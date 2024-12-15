@@ -86,36 +86,43 @@ class DesktopWidget:
             widget.destroy()
 
         if "http" in path:
-            # Si es una URL, obtenemos el favicon (ícono del sitio web)
+            # Si es una URL, obtenemos el favicon (icono del sitio web)
             favicon = self.fetch_favicon(path)
-            label = tk.Label(slot, text=path, bg="#23272a", fg="white", wraplength=160)
-            label.pack(expand=True, fill="both")
-
             if favicon:
                 img = Image.open(BytesIO(favicon))
-                img = img.resize((slot.winfo_width(), slot.winfo_height()-20))  # Redimensionar la imagen para que quepa en el slot
+                img = img.resize((30, 30))  # Ajustar el tamaño del favicon
                 icon = ImageTk.PhotoImage(img)
-                icon_label = tk.Label(slot, image=icon, bg="#23272a")
-                icon_label.image = icon
-                icon_label.pack(expand=True, fill="both")
+            else:
+                icon = None
 
-            # Mostrar el nombre del dominio debajo del ícono
-            domain = urlparse(path).netloc
-            domain_label = tk.Label(slot, text=domain, bg="#23272a", fg="white", wraplength=160)
-            domain_label.pack(expand=True, fill="both")
+            # Crear el botón con la URL
+            url_button = tk.Button(
+                slot,
+                text=path,
+                image=icon,
+                compound="left",
+                wraplength=160,
+                bg="#23272a",
+                fg="white",
+                command=lambda url=path: webbrowser.open(url)  # Abre la URL
+            )
+            url_button.image = icon  # Asociar la imagen al botón
+            url_button.pack(expand=True, fill="both")
 
-            # Hacer que al hacer click en el label, se abra la URL
-            label.bind("<Button-1>", lambda event, url=path: webbrowser.open(url))
         else:
             # Si es un archivo (EXE) o una carpeta
-            label = tk.Label(slot, text=path, bg="#23272a", fg="white", wraplength=160)
+            label = tk.Button(
+                slot,
+                text=path,
+                bg="#23272a",
+                fg="white",
+                wraplength=160,
+                command=lambda p=path: self.open_item(p)  # Abrir archivo/carpeta
+            )
             label.pack(expand=True, fill="both")
 
-            # Hacer que al hacer click en el label, se abra la carpeta o el EXE
-            label.bind("<Button-1>", lambda event, p=path: self.open_item(p))
-
         # Agregar el menú de contexto al slot
-        label.bind("<Button-3>", lambda event, s=slot, l=label: self.show_context_menu(event, s, l))
+        slot.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
         self.slot_data[slot] = path
         option_window.destroy()
 
@@ -129,15 +136,9 @@ class DesktopWidget:
             # Verificar si la respuesta fue exitosa
             if response.status_code == 200:
                 return response.content
-            else:
-                return self.default_favicon()  # Retornar un favicon por defecto si falla la obtención
         except Exception as e:
             print(f"Error al obtener favicon: {e}")
-            return self.default_favicon()  # Retornar un favicon por defecto en caso de error
-
-    def default_favicon(self):
-        """Retorna un favicon por defecto (un ícono pequeño)."""
-        return Image.new('RGB', (16, 16), color='gray').tobytes()
+        return None
 
     def open_item(self, path):
         """Abre un archivo (EXE) o carpeta."""
@@ -146,50 +147,24 @@ class DesktopWidget:
         else:
             os.startfile(path)  # Abrir el EXE u otro archivo
 
-    def show_context_menu(self, event, slot, label):
-        """Muestra el menú de contexto para un slot."""
-        context_menu = tk.Menu(self.root, tearoff=0)
-        context_menu.add_command(label="Renombrar", command=lambda: self.edit_label(label))
-        context_menu.add_command(label="Eliminar", command=lambda: self.remove_item(slot))
-        context_menu.tk_popup(event.x_root, event.y_root)
-
     def show_slot_context_menu(self, event, slot):
         """Muestra el menú de contexto para un slot (click derecho)."""
         context_menu = tk.Menu(self.root, tearoff=0)
+        context_menu.add_command(label="Renombrar Slot", command=lambda: self.rename_slot(slot))
         context_menu.add_command(label="Eliminar Slot", command=lambda: self.remove_slot(slot))
         context_menu.tk_popup(event.x_root, event.y_root)
 
-    def edit_label(self, label):
-        """Permite renombrar el slot."""
-        current_text = label.cget("text")
-        label.pack_forget()
-        
-        entry = tk.Entry(label.master, bg="#23272a", fg="white", justify="center")
-        entry.insert(0, current_text)
-        entry.pack(expand=True, fill="both")
-        
-        # Guardar el nuevo nombre al presionar Enter o al salir del campo
-        entry.bind("<Return>", lambda event, l=label, e=entry: self.update_label_text(l, e))
-        entry.bind("<FocusOut>", lambda event, l=label, e=entry: self.update_label_text(l, e))
-
-    def update_label_text(self, label, entry):
-        """Actualiza el texto del label con el nuevo nombre."""
-        new_text = entry.get()
-        entry.pack_forget()
-        label.config(text=new_text)
-        label.pack(expand=True, fill="both")
-
-    def remove_item(self, slot):
-        """Elimina un item de un slot."""
-        if messagebox.askyesno("Confirmar", "¿Querés eliminar este ítem?"):
+    def rename_slot(self, slot):
+        """Permite renombrar un slot."""
+        current_name = self.slot_data.get(slot, "")
+        new_name = simpledialog.askstring("Renombrar Slot", "Ingresa el nuevo nombre:", initialvalue=current_name)
+        if new_name:
+            self.slot_data[slot] = new_name
+            # Actualizar la visualización
             for widget in slot.winfo_children():
                 widget.destroy()
-
-            add_button = tk.Button(slot, text="+", font=("Arial", 24), command=lambda s=slot: self.show_add_options(s))
-            add_button.pack(expand=True, fill="both")
-
-            if slot in self.slot_data:
-                del self.slot_data[slot]
+            label = tk.Label(slot, text=new_name, bg="#23272a", fg="white", wraplength=160)
+            label.pack(expand=True, fill="both")
 
     def remove_slot(self, slot):
         """Elimina un slot completo."""
