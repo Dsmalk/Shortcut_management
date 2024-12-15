@@ -1,33 +1,50 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, simpledialog, messagebox
 import os
-import requests
 import webbrowser
+import requests
 from urllib.parse import urlparse
 from PIL import Image, ImageTk
 from io import BytesIO
+import sys
 
 class DesktopWidget:
     def __init__(self, root):
         self.root = root
-        self.root.geometry("400x100")
-        self.root.title("Widget de Escritorio")
+        self.root.geometry("345x135")
+        self.root.title("Shortcut Management v.1.0")
         self.root.configure(bg="#2c2f33")
 
-        self.slots = []  # Lista de espacios donde se agregarán los accesos
-        self.slot_data = {}  # Datos asociados a cada slot (espacio)
+        # Asignar ícono a la ventana principal
+        if hasattr(sys, '_MEIPASS'):  # Cuando se ejecuta como EXE
+            current_dir = sys._MEIPASS
+        else:  # Cuando se ejecuta en modo script
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        icon_path = os.path.join(current_dir, "folder.ico")
+        self.root.iconbitmap(icon_path)
+
+        self.slots = []  # Lista de slots
+        self.slot_data = {}  # Datos asociados a cada slot (path, ícono, nombre personalizado)
 
         # Crear el menú
         self.menu_bar = tk.Menu(self.root)
         self.root.config(menu=self.menu_bar)
-        self.menu_bar.add_command(label="Agregar Slot", command=self.add_slot)  # Agregar un nuevo slot
-        self.menu_bar.add_command(label="Eliminar Slot", command=self.remove_last_slot)  # Eliminar el último slot
+        self.menu_bar.add_command(label="Agregar Slot", command=self.add_slot)
+        self.menu_bar.add_command(label="Información", command=self.show_info)
 
-        # Crear el contenedor para los slots
-        self.slot_frame = tk.Frame(self.root, bg="#2c2f33")
-        self.slot_frame.pack(expand=True, fill="both")
+        # Contenedor con scrollbar horizontal
+        self.canvas = tk.Canvas(self.root, bg="#2c2f33", highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self.root, orient="horizontal", command=self.canvas.xview)
+        self.scrollbar.pack(side="bottom", fill="x")
+        self.canvas.pack(expand=True, fill="both")
+        self.canvas.configure(xscrollcommand=self.scrollbar.set)
 
-        # Crear los primeros 4 slots
+        # Frame dentro del canvas para los slots
+        self.slot_frame = tk.Frame(self.canvas, bg="#2c2f33")
+        self.canvas.create_window((0, 0), window=self.slot_frame, anchor="nw")
+
+        # Inicializar los slots
         self.create_initial_slots()
 
     def create_initial_slots(self):
@@ -35,150 +52,149 @@ class DesktopWidget:
             self.add_slot()
 
     def add_slot(self):
-        slot = tk.Frame(self.slot_frame, bg="#23272a", highlightbackground="#7289da", highlightthickness=2)
-        slot.pack(side="left", padx=5, pady=15, fill="both", expand=True)
+        slot = tk.Frame(self.slot_frame, bg="#23272a", highlightbackground="#7289da", highlightthickness=2, width=75, height=75)
+        slot.pack(side="left", padx=5, pady=15)
+        slot.pack_propagate(False)
 
         add_button = tk.Button(slot, text="+", font=("Arial", 30), command=lambda s=slot: self.show_add_options(s))
         add_button.pack(expand=True, fill="both")
 
-        # Hacer que al hacer click derecho en el slot, se muestren opciones
+        add_button.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
         slot.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
 
         self.slots.append(slot)
+        self.update_canvas_width()
+
+    def update_canvas_width(self):
+        # Ajustar el ancho del canvas según la cantidad de slots
+        total_width = len(self.slots) * 110  # 100px slot + 10px espacio
+        self.canvas.config(scrollregion=(0, 0, total_width, 200))
 
     def show_add_options(self, slot):
-        """Muestra las opciones para agregar una URL, EXE o Carpeta."""
         option_window = tk.Toplevel(self.root)
         option_window.title("Elegir una opción")
         option_window.geometry("200x150")
 
-        add_url_button = tk.Button(option_window, text="Agregar URL", command=lambda: self.add_url(slot, option_window))
-        add_url_button.pack(pady=10)
-
-        add_exe_button = tk.Button(option_window, text="Agregar EXE", command=lambda: self.add_exe(slot, option_window))
-        add_exe_button.pack(pady=10)
-
-        add_folder_button = tk.Button(option_window, text="Agregar Carpeta", command=lambda: self.add_folder(slot, option_window))
-        add_folder_button.pack(pady=10)
+        tk.Button(option_window, text="Agregar URL", command=lambda: self.add_url(slot, option_window)).pack(pady=10)
+        tk.Button(option_window, text="Agregar Carpeta", command=lambda: self.add_folder(slot, option_window)).pack(pady=10)
 
     def add_url(self, slot, option_window):
-        """Maneja la adición de una URL."""
         url = simpledialog.askstring("Agregar URL", "Ingresa la URL (por ejemplo, http://youtube.com):", initialvalue="http://")
         if url:
             self.add_to_slot(slot, url, option_window)
 
-    def add_exe(self, slot, option_window):
-        """Maneja la adición de un archivo EXE."""
-        exe_path = filedialog.askopenfilename(title="Seleccionar EXE", filetypes=[("Archivos Ejecutables", "*.exe")])
-        if exe_path:
-            self.add_to_slot(slot, exe_path, option_window)
-
     def add_folder(self, slot, option_window):
-        """Maneja la adición de una carpeta."""
         folder_path = filedialog.askdirectory(title="Seleccionar Carpeta")
         if folder_path:
             self.add_to_slot(slot, folder_path, option_window)
 
     def add_to_slot(self, slot, path, option_window):
-        """Agrega el item seleccionado (URL, EXE o Carpeta) al slot."""
-        # Limpiar el slot antes de agregar el nuevo contenido
         for widget in slot.winfo_children():
             widget.destroy()
 
+        icon = None
+        name = path  # Por defecto el nombre será la URL o el path
+
         if "http" in path:
-            # Si es una URL, obtenemos el favicon (icono del sitio web)
-            favicon = self.fetch_favicon(path)
-            if favicon:
-                img = Image.open(BytesIO(favicon))
-                img = img.resize((30, 30))  # Ajustar el tamaño del favicon
-                icon = ImageTk.PhotoImage(img)
-            else:
-                icon = None
-
-            # Crear el botón con la URL
-            url_button = tk.Button(
-                slot,
-                text=path,
-                image=icon,
-                compound="left",
-                wraplength=160,
-                bg="#23272a",
-                fg="white",
-                command=lambda url=path: webbrowser.open(url)  # Abre la URL
-            )
-            url_button.image = icon  # Asociar la imagen al botón
-            url_button.pack(expand=True, fill="both")
-
+            icon = self.fetch_favicon(path)
         else:
-            # Si es un archivo (EXE) o una carpeta
-            label = tk.Button(
-                slot,
-                text=path,
-                bg="#23272a",
-                fg="white",
-                wraplength=160,
-                command=lambda p=path: self.open_item(p)  # Abrir archivo/carpeta
-            )
-            label.pack(expand=True, fill="both")
+            icon = self.get_folder_icon()
 
-        # Agregar el menú de contexto al slot
-        slot.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
-        self.slot_data[slot] = path
+        button = tk.Button(
+            slot,
+            text=name,
+            image=icon,
+            compound="top" if icon else None,
+            wraplength=80,
+            bg="#23272a",
+            fg="white",
+            command=lambda p=path: self.open_item(p)
+        )
+        button.image = icon
+        button.pack(expand=True, fill="both")
+
+        button.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
+
+        self.slot_data[slot] = {"path": path, "name": name, "icon": icon}
         option_window.destroy()
 
     def fetch_favicon(self, url):
-        """Obtiene el favicon de una URL."""
         try:
             parsed_url = urlparse(url)
             favicon_url = f"https://www.google.com/s2/favicons?domain={parsed_url.netloc}"
             response = requests.get(favicon_url)
-
-            # Verificar si la respuesta fue exitosa
             if response.status_code == 200:
-                return response.content
+                img_data = response.content
+                img = Image.open(BytesIO(img_data))
+                img = img.resize((30, 30))
+                return ImageTk.PhotoImage(img)
         except Exception as e:
-            print(f"Error al obtener favicon: {e}")
+            print(f"Error obteniendo favicon: {e}")
         return None
 
+    def get_folder_icon(self):
+        """Devuelve el ícono de carpeta desde la ruta especificada."""
+        folder_icon_path = os.path.join(sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(os.path.abspath(__file__)), "folder.png")
+        try:
+            img = Image.open(folder_icon_path)
+            img = img.resize((30, 30))
+            return ImageTk.PhotoImage(img)
+        except Exception as e:
+            print(f"Error cargando ícono de carpeta: {e}")
+            return None
+
     def open_item(self, path):
-        """Abre un archivo (EXE) o carpeta."""
         if os.path.isdir(path):
-            os.startfile(path)  # Abrir la carpeta
-        else:
-            os.startfile(path)  # Abrir el EXE u otro archivo
+            os.startfile(path)
+        elif "http" in path:
+            webbrowser.open(path)
 
     def show_slot_context_menu(self, event, slot):
-        """Muestra el menú de contexto para un slot (click derecho)."""
         context_menu = tk.Menu(self.root, tearoff=0)
         context_menu.add_command(label="Renombrar Slot", command=lambda: self.rename_slot(slot))
         context_menu.add_command(label="Eliminar Slot", command=lambda: self.remove_slot(slot))
         context_menu.tk_popup(event.x_root, event.y_root)
 
     def rename_slot(self, slot):
-        """Permite renombrar un slot."""
-        current_name = self.slot_data.get(slot, "")
-        new_name = simpledialog.askstring("Renombrar Slot", "Ingresa el nuevo nombre:", initialvalue=current_name)
+        data = self.slot_data.get(slot, {})
+        new_name = simpledialog.askstring("Renombrar Slot", "Nuevo nombre:", initialvalue=data.get("name", ""))
         if new_name:
-            self.slot_data[slot] = new_name
-            # Actualizar la visualización
+            self.slot_data[slot]["name"] = new_name
             for widget in slot.winfo_children():
                 widget.destroy()
-            label = tk.Label(slot, text=new_name, bg="#23272a", fg="white", wraplength=160)
-            label.pack(expand=True, fill="both")
+            icon = data.get("icon")
+            button = tk.Button(
+                slot,
+                text=new_name,
+                image=icon,
+                compound="top" if icon else None,
+                wraplength=80,
+                bg="#23272a",
+                fg="white",
+                command=lambda p=data["path"]: self.open_item(p)
+            )
+            button.pack(expand=True, fill="both")
+            button.bind("<Button-3>", lambda event, s=slot: self.show_slot_context_menu(event, s))
 
     def remove_slot(self, slot):
-        """Elimina un slot completo."""
-        if slot in self.slots and messagebox.askyesno("Confirmar", "¿Querés eliminar este slot?"):
-            for widget in slot.winfo_children():
-                widget.destroy()
-            slot.destroy()
+        """Eliminar un slot del widget."""
+        if slot in self.slots:
             self.slots.remove(slot)
+            self.slot_data.pop(slot, None)
+            slot.destroy()
+            self.update_canvas_width()
 
-    def remove_last_slot(self):
-        """Elimina el último slot."""
-        if self.slots:
-            slot = self.slots[-1]
-            self.remove_slot(slot)
+    def show_info(self):
+        messagebox.showinfo("Información", 
+                            "Muchas gracias por descargar Shortcut Management\n\n"
+                            "Esta aplicación está pensada para facilitar el uso de carpetas o URLs "
+                            "con el fin de ahorrar el tiempo de búsqueda de tales.\n\n"
+                            "Funcionamiento:\n"
+                            "Una vez agregado un URL o una carpeta, se podrá cambiar el nombre o eliminar "
+                            "con click derecho sobre tal.\n\n"
+                            "Version 1.0.0"
+                            )
+
 
 if __name__ == "__main__":
     root = tk.Tk()
